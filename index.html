@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Stockfish.js Chess</title>
+<style>
+body {
+    background: #111;
+    color: white;
+    font-family: Arial, sans-serif;
+    text-align: center;
+}
+#board {
+    display: grid;
+    grid-template-columns: repeat(8, 60px);
+    width: 480px;
+    margin: 20px auto;
+    border: 4px solid #444;
+}
+.square {
+    width: 60px;
+    height: 60px;
+    font-size: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+.white { background: #eee; color: black; }
+.black { background: #555; }
+#status { margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<h1>♟ Chess vs Stockfish</h1>
+<div id="board"></div>
+<div id="status">Your move</div>
+
+<script>
+/* ---------------- PIECES ---------------- */
+const pieces = {
+ r:"♜", n:"♞", b:"♝", q:"♛", k:"♚", p:"♟",
+ R:"♖", N:"♘", B:"♗", Q:"♕", K:"♔", P:"♙"
+};
+
+let board = [
+"rnbqkbnr",
+"pppppppp",
+"........",
+"........",
+"........",
+"........",
+"PPPPPPPP",
+"RNBQKBNR"
+];
+
+let selected = null;
+let moves = [];
+
+/* ---------------- STOCKFISH (CDN) ---------------- */
+const engine = new Worker(
+  "https://cdn.jsdelivr.net/npm/stockfish@16.1/stockfish.js"
+);
+
+engine.postMessage("uci");
+engine.postMessage("isready");
+
+engine.onmessage = e => {
+    if (e.data.startsWith("bestmove")) {
+        const move = e.data.split(" ")[1];
+        playMove(move);
+        draw();
+        document.getElementById("status").textContent = "Your move";
+    }
+};
+
+/* ---------------- BOARD ---------------- */
+const boardDiv = document.getElementById("board");
+
+function draw() {
+    boardDiv.innerHTML = "";
+    for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+            const sq = document.createElement("div");
+            sq.className = "square " + ((r+c)%2 ? "black":"white");
+            const p = board[r][c];
+            if (p !== ".") sq.textContent = pieces[p];
+            sq.onclick = () => click(r,c);
+            boardDiv.appendChild(sq);
+        }
+    }
+}
+
+function click(r,c) {
+    if (!selected) {
+        selected = {r,c};
+    } else {
+        const move = coord(selected,r,c);
+        selected = null;
+        playMove(move);
+        draw();
+        document.getElementById("status").textContent = "Stockfish thinking...";
+        engine.postMessage("position startpos moves " + moves.join(" "));
+        engine.postMessage("go depth 12");
+    }
+}
+
+function coord(a,r,c) {
+    return "abcdefgh"[a.c] + (8-a.r) +
+           "abcdefgh"[c] + (8-r);
+}
+
+/* ---------------- MOVE LOGIC ---------------- */
+function playMove(m) {
+    const f1 = 8 - m[1];
+    const f2 = "abcdefgh".indexOf(m[0]);
+    const t1 = 8 - m[3];
+    const t2 = "abcdefgh".indexOf(m[2]);
+
+    const piece = board[f1][f2];
+    board[f1] = replace(board[f1], f2, ".");
+    board[t1] = replace(board[t1], t2, piece);
+    moves.push(m);
+}
+
+function replace(str,i,ch) {
+    return str.substring(0,i) + ch + str.substring(i+1);
+}
+
+draw();
+</script>
+
+</body>
+</html>

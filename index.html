@@ -5,43 +5,58 @@
 <title>Chess vs Stockfish</title>
 <style>
 body {
-    background:#111;
+    background:#0b0b0b;
     color:white;
     font-family:Arial;
     text-align:center;
 }
 #board {
     display:grid;
-    grid-template-columns:repeat(8,60px);
-    width:480px;
+    grid-template-columns:repeat(8,64px);
+    width:512px;
     margin:20px auto;
+    border:3px solid #444;
 }
 .square {
-    width:60px;
-    height:60px;
-    font-size:40px;
+    width:64px;
+    height:64px;
     display:flex;
     align-items:center;
     justify-content:center;
+}
+.white { background:#f0d9b5; }
+.black { background:#b58863; }
+.square img {
+    width:52px;
+    height:52px;
     cursor:pointer;
 }
-.white { background:#eee; color:black; }
-.black { background:#666; }
 </style>
 </head>
 <body>
 
 <h1>♟ Chess vs Stockfish</h1>
 <div id="board"></div>
-<div id="status">Your move</div>
+<div id="status">Loading engine...</div>
 
 <script>
-/* ---------------- PIECES ---------------- */
-const P = {
- r:"♜",n:"♞",b:"♝",q:"♛",k:"♚",p:"♟",
- R:"♖",N:"♘",B:"♗",Q:"♕",K:"♔",P:"♙"
+/* ---------------- PIECES (chess.com CDN) ---------------- */
+const PIECES = {
+ r:"https://images.chesscomfiles.com/chess-themes/pieces/neo/150/br.png",
+ n:"https://images.chesscomfiles.com/chess-themes/pieces/neo/150/bn.png",
+ b:"https://images.chesscomfiles.com/chess-themes/pieces/neo/150/bb.png",
+ q:"https://images.chesscomfiles.com/chess-themes/pieces/neo/150/bq.png",
+ k:"https://images.chesscomfiles.com/chess-themes/pieces/neo/150/bk.png",
+ p:"https://images.chesscomfiles.com/chess-themes/pieces/neo/150/bp.png",
+ R:"https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wr.png",
+ N:"https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wn.png",
+ B:"https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wb.png",
+ Q:"https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wq.png",
+ K:"https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wk.png",
+ P:"https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wp.png"
 };
 
+/* ---------------- GAME STATE ---------------- */
 let board=[
 "rnbqkbnr",
 "pppppppp",
@@ -52,77 +67,83 @@ let board=[
 "PPPPPPPP",
 "RNBQKBNR"
 ];
-
 let selected=null;
-let history=[];
+let moves=[];
 
-/* ---------------- SAFE STOCKFISH WORKER ---------------- */
-const workerCode = `
-self.importScripts("https://cdn.jsdelivr.net/npm/stockfish@16.1/stockfish.js");
-self.onmessage = e => postMessage(e.data);
-`;
+/* ---------------- LOAD STOCKFISH SAFELY ---------------- */
+async function loadEngine(){
+    const res = await fetch(
+      "https://cdn.jsdelivr.net/npm/stockfish@16.1/stockfish.js"
+    );
+    const code = await res.text();
 
-const engine = new Worker(
-    URL.createObjectURL(new Blob([workerCode],{type:"application/javascript"}))
-);
+    const blob = new Blob([code], {type:"application/javascript"});
+    const engine = new Worker(URL.createObjectURL(blob));
 
-engine.postMessage("uci");
-engine.postMessage("isready");
+    engine.postMessage("uci");
+    engine.postMessage("isready");
 
-engine.onmessage = e => {
-    if(e.data.startsWith("bestmove")){
-        move(e.data.split(" ")[1]);
-        draw();
-        status("Your move");
-    }
-};
+    engine.onmessage = e => {
+        if(e.data.startsWith("bestmove")){
+            applyMove(e.data.split(" ")[1]);
+            draw();
+            status("Your move");
+        }
+    };
+    return engine;
+}
 
-/* ---------------- BOARD ---------------- */
+const enginePromise = loadEngine();
 const boardDiv=document.getElementById("board");
 const statusDiv=document.getElementById("status");
-
 function status(t){ statusDiv.textContent=t; }
 
+/* ---------------- DRAW BOARD ---------------- */
 function draw(){
     boardDiv.innerHTML="";
     for(let r=0;r<8;r++)for(let c=0;c<8;c++){
-        const d=document.createElement("div");
-        d.className="square "+((r+c)%2?"black":"white");
+        const sq=document.createElement("div");
+        sq.className="square "+((r+c)%2?"black":"white");
         const p=board[r][c];
-        if(p!=".") d.textContent=P[p];
-        d.onclick=()=>click(r,c);
-        boardDiv.appendChild(d);
+        if(p!="."){
+            const img=document.createElement("img");
+            img.src=PIECES[p];
+            sq.appendChild(img);
+        }
+        sq.onclick=()=>click(r,c);
+        boardDiv.appendChild(sq);
     }
 }
 
-function click(r,c){
+async function click(r,c){
     if(!selected){
         if(board[r][c]===".") return;
         selected={r,c};
     } else {
-        const m=toUCI(selected,r,c);
+        const m=uci(selected,r,c);
         selected=null;
-        move(m);
+        applyMove(m);
         draw();
         status("Stockfish thinking...");
-        engine.postMessage("position startpos moves "+history.join(" "));
+        const engine=await enginePromise;
+        engine.postMessage("position startpos moves "+moves.join(" "));
         engine.postMessage("go depth 12");
     }
 }
 
-function toUCI(a,r,c){
+function uci(a,r,c){
     return "abcdefgh"[a.c]+(8-a.r)+
            "abcdefgh"[c]+(8-r);
 }
 
-/* ---------------- MOVE ---------------- */
-function move(m){
+/* ---------------- MOVE APPLY ---------------- */
+function applyMove(m){
     const fr=8-m[1], fc="abcdefgh".indexOf(m[0]);
     const tr=8-m[3], tc="abcdefgh".indexOf(m[2]);
-    const piece=board[fr][fc];
+    const p=board[fr][fc];
     board[fr]=set(board[fr],fc,".");
-    board[tr]=set(board[tr],tc,piece);
-    history.push(m);
+    board[tr]=set(board[tr],tc,p);
+    moves.push(m);
 }
 
 function set(s,i,c){
@@ -130,6 +151,8 @@ function set(s,i,c){
 }
 
 draw();
+status("Your move");
 </script>
+
 </body>
 </html>
